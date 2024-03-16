@@ -420,7 +420,9 @@ class BaseAlgorithm(ABC):
         # Avoid resetting the environment when calling ``.learn()`` consecutive times
         if reset_num_timesteps or self._last_obs is None:
             assert self.env is not None
+            # pytype: disable=annotation-type-mismatch
             self._last_obs = self.env.reset()  # type: ignore[assignment]
+            # pytype: enable=annotation-type-mismatch
             self._last_episode_starts = np.ones((self.env.num_envs,), dtype=bool)
             # Retrieve unnormalized observation for saving into the buffer
             if self._vec_normalize_env is not None:
@@ -523,10 +525,7 @@ class BaseAlgorithm(ABC):
 
         :param total_timesteps: The total number of samples (env steps) to train on
         :param callback: callback(s) called at every step with state of the algorithm.
-        :param log_interval: for on-policy algos (e.g., PPO, A2C, ...) this is the number of
-            training iterations (i.e., log_interval * n_steps * n_envs timesteps) before logging;
-            for off-policy algos (e.g., TD3, SAC, ...) this is the number of episodes before
-            logging.
+        :param log_interval: The number of episodes before logging.
         :param tb_log_name: the name of the run for TensorBoard logging
         :param reset_num_timesteps: whether or not to reset the current timestep number (used in logging)
         :param progress_bar: Display a progress bar using tqdm and rich.
@@ -575,6 +574,11 @@ class BaseAlgorithm(ABC):
         load_path_or_dict: Union[str, TensorDict],
         exact_match: bool = True,
         device: Union[th.device, str] = "auto",
+        exclude_adaptor_net: bool = False
+        # adaptation_training: bool = False,
+        # continue_training: bool = False,
+        # base_training: bool = False,
+        # no_adaptor_eval: bool = False,
     ) -> None:
         """
         Load parameters from a given zip-file or a nested dictionary containing parameters for
@@ -629,7 +633,15 @@ class BaseAlgorithm(ABC):
                 attr.load_state_dict(params[name])  # type: ignore[arg-type]
             else:
                 # Assume attr is th.nn.Module
-                attr.load_state_dict(params[name], strict=exact_match)
+                # Yichao add -- for loading the non-vision-based model for 
+                # adaptation training, but will cause problem for evaluation
+                if exclude_adaptor_net:
+                    state_dict = {k: v for k, v in params[name].items() 
+                                        if not k.startswith('adapt_tconv')}
+                    attr.load_state_dict(state_dict, strict=False)
+                else:
+                    # previous version
+                    attr.load_state_dict(params[name], strict=exact_match)
             updated_objects.add(name)
 
         if exact_match and updated_objects != objects_needing_update:
@@ -647,6 +659,11 @@ class BaseAlgorithm(ABC):
         custom_objects: Optional[Dict[str, Any]] = None,
         print_system_info: bool = False,
         force_reset: bool = True,
+        exclude_adaptor_net: bool = False,
+        # adaptation_training: bool = False,
+        # base_training: bool = False,
+        # continue_training: bool = False,
+        # no_adaptor_eval: bool = False
         **kwargs,
     ) -> SelfBaseAlgorithm:
         """
@@ -676,6 +693,7 @@ class BaseAlgorithm(ABC):
         if print_system_info:
             print("== CURRENT SYSTEM INFO ==")
             get_system_info()
+        # breakpoint()
 
         data, params, pytorch_variables = load_from_zip_file(
             path,
@@ -697,24 +715,26 @@ class BaseAlgorithm(ABC):
                 if isinstance(saved_net_arch, list) and isinstance(saved_net_arch[0], dict):
                     data["policy_kwargs"]["net_arch"] = saved_net_arch[0]
 
-        if "policy_kwargs" in kwargs and kwargs["policy_kwargs"] != data["policy_kwargs"]:
-            raise ValueError(
-                f"The specified policy kwargs do not equal the stored policy kwargs."
-                f"Stored kwargs: {data['policy_kwargs']}, specified kwargs: {kwargs['policy_kwargs']}"
-            )
+        # Yichao: comments out to allow adding depth to adaptation
+        # if "policy_kwargs" in kwargs and kwargs["policy_kwargs"] != data["policy_kwargs"]:
+        #     raise ValueError(
+        #         f"The specified policy kwargs do not equal the stored policy kwargs."
+        #         f"Stored kwargs: {data['policy_kwargs']}, specified kwargs: {kwargs['policy_kwargs']}"
+        #     )
 
         if "observation_space" not in data or "action_space" not in data:
             raise KeyError("The observation_space and action_space were not given, can't verify new environments")
 
         # Gym -> Gymnasium space conversion
         for key in {"observation_space", "action_space"}:
-            data[key] = _convert_space(data[key])
+            data[key] = _convert_space(data[key])  # pytype: disable=unsupported-operands
 
         if env is not None:
             # Wrap first if needed
             env = cls._wrap_env(env, data["verbose"])
             # Check if given env is valid
-            check_for_correct_spaces(env, data["observation_space"], data["action_space"])
+            # Yichao: comment out to make env with diff obs_mode compatible
+            # check_for_correct_spaces(env, data["observation_space"], data["action_space"])
             # Discard `_last_obs`, this will force the env to reset before training
             # See issue https://github.com/DLR-RM/stable-baselines3/issues/597
             if force_reset and data is not None:
@@ -727,12 +747,14 @@ class BaseAlgorithm(ABC):
             if "env" in data:
                 env = data["env"]
 
+        # pytype: disable=not-instantiable,wrong-keyword-args
         model = cls(
             policy=data["policy_class"],
             env=env,
             device=device,
             _init_setup_model=False,  # type: ignore[call-arg]
         )
+        # pytype: enable=not-instantiable,wrong-keyword-args
 
         # load parameters
         model.__dict__.update(data)
@@ -741,11 +763,18 @@ class BaseAlgorithm(ABC):
 
         try:
             # put state_dicts back in place
-            model.set_parameters(params, exact_match=True, device=device)
+            model.set_parameters(params, exact_match=True, device=device,
+                                 exclude_adaptor_net=exclude_adaptor_net,
+                                #  continue_training=continue_training,
+                                #  adaptation_training=adaptation_training,
+                                #  base_training=base_training,
+                                # no_adaptor_eval=no_adaptor_eval,
+                                 )
         except RuntimeError as e:
-            # Patch to load Policy saved using SB3 < 1.7.0
-            # the error is probably due to old policy being loaded
-            # See https://github.com/DLR-RM/stable-baselines3/issues/1233
+            # pass
+            # # Patch to load Policy saved using SB3 < 1.7.0
+            # # the error is probably due to old policy being loaded
+            # # See https://github.com/DLR-RM/stable-baselines3/issues/1233
             if "pi_features_extractor" in str(e) and "Missing key(s) in state_dict" in str(e):
                 model.set_parameters(params, exact_match=False, device=device)
                 warnings.warn(
@@ -775,7 +804,7 @@ class BaseAlgorithm(ABC):
         # Sample gSDE exploration matrix, so it uses the right device
         # see issue #44
         if model.use_sde:
-            model.policy.reset_noise()  # type: ignore[operator]
+            model.policy.reset_noise()  # type: ignore[operator]  # pytype: disable=attribute-error
         return model
 
     def get_parameters(self) -> Dict[str, Dict]:

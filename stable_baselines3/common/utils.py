@@ -19,7 +19,7 @@ import stable_baselines3 as sb3
 try:
     from torch.utils.tensorboard import SummaryWriter
 except ImportError:
-    SummaryWriter = None  # type: ignore[misc, assignment]
+    SummaryWriter = None
 
 from stable_baselines3.common.logger import Logger, configure
 from stable_baselines3.common.type_aliases import GymEnv, Schedule, TensorDict, TrainFreq, TrainFrequencyUnit
@@ -151,8 +151,10 @@ def get_device(device: Union[th.device, str] = "auto") -> th.device:
     device = th.device(device)
 
     # Cuda not available
+    print("cuda is available:", th.cuda.is_available())
     if device.type == th.device("cuda").type and not th.cuda.is_available():
         return th.device("cpu")
+    print("it's using", device)
 
     return device
 
@@ -203,7 +205,9 @@ def configure_logger(
         if not reset_num_timesteps:
             # Continue training in the same directory
             latest_run_id -= 1
-        save_path = os.path.join(tensorboard_log, f"{tb_log_name}_{latest_run_id + 1}")
+        # yichao modify:
+        # save_path = os.path.join(tensorboard_log, f"{tb_log_name}_{latest_run_id + 1}")
+        save_path = tensorboard_log
         if verbose >= 1:
             format_strings = ["stdout", "tensorboard"]
         else:
@@ -396,13 +400,13 @@ def is_vectorized_observation(observation: Union[int, np.ndarray], observation_s
 
     for space_type, is_vec_obs_func in is_vec_obs_func_dict.items():
         if isinstance(observation_space, space_type):
-            return is_vec_obs_func(observation, observation_space)  # type: ignore[operator]
+            return is_vec_obs_func(observation, observation_space)
     else:
         # for-else happens if no break is called
         raise ValueError(f"Error: Cannot determine if the observation is vectorized with the space type {observation_space}.")
 
 
-def safe_mean(arr: Union[np.ndarray, list, deque]) -> float:
+def safe_mean(arr: Union[np.ndarray, list, deque]) -> np.ndarray:
     """
     Compute the mean of an array if there is at least one element.
     For empty array, return NaN. It is used for logging only.
@@ -410,7 +414,7 @@ def safe_mean(arr: Union[np.ndarray, list, deque]) -> float:
     :param arr: Numpy array or list of values
     :return:
     """
-    return np.nan if len(arr) == 0 else float(np.mean(arr))  # type: ignore[arg-type]
+    return np.nan if len(arr) == 0 else np.mean(arr)
 
 
 def get_parameters_by_name(model: th.nn.Module, included_names: Iterable[str]) -> List[th.Tensor]:
@@ -536,7 +540,7 @@ def get_system_info(print_info: bool = True) -> Tuple[Dict[str, str], str]:
         "Gymnasium": gym.__version__,
     }
     try:
-        import gym as openai_gym
+        import gym as openai_gym  # pytype: disable=import-error
 
         env_info.update({"OpenAI Gym": openai_gym.__version__})
     except ImportError:

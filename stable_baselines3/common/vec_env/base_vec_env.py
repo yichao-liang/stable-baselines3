@@ -1,7 +1,6 @@
 import inspect
 import warnings
 from abc import ABC, abstractmethod
-from copy import deepcopy
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Type, Union
 
 import cloudpickle
@@ -68,8 +67,6 @@ class VecEnv(ABC):
         self.reset_infos: List[Dict[str, Any]] = [{} for _ in range(num_envs)]
         # seeds to be used in the next call to env.reset()
         self._seeds: List[Optional[int]] = [None for _ in range(num_envs)]
-        # options to be used in the next call to env.reset()
-        self._options: List[Dict[str, Any]] = [{} for _ in range(num_envs)]
 
         try:
             render_modes = self.get_attr("render_mode")
@@ -97,12 +94,6 @@ class VecEnv(ABC):
         Reset the seeds that are going to be used at the next reset.
         """
         self._seeds = [None for _ in range(self.num_envs)]
-
-    def _reset_options(self) -> None:
-        """
-        Reset the options that are going to be used at the next reset.
-        """
-        self._options = [{} for _ in range(self.num_envs)]
 
     @abstractmethod
     def reset(self) -> VecEnvObs:
@@ -258,7 +249,7 @@ class VecEnv(ABC):
 
             if mode == "human":
                 # Display it using OpenCV
-                import cv2
+                import cv2  # pytype:disable=import-error
 
                 cv2.imshow("vecenv", bigimg[:, :, ::-1])
                 cv2.waitKey(1)
@@ -287,26 +278,10 @@ class VecEnv(ABC):
         if seed is None:
             # To ensure that subprocesses have different seeds,
             # we still populate the seed variable when no argument is passed
-            seed = int(np.random.randint(0, np.iinfo(np.uint32).max, dtype=np.uint32))
+            seed = np.random.randint(0, 2**32 - 1)
 
         self._seeds = [seed + idx for idx in range(self.num_envs)]
         return self._seeds
-
-    def set_options(self, options: Optional[Union[List[Dict], Dict]] = None) -> None:
-        """
-        Set environment options for all environments.
-        If a dict is passed instead of a list, the same options will be used for all environments.
-        WARNING: Those options will only be passed to the environment at the next reset.
-
-        :param options: A dictionary of environment options to pass to each environment at the next reset.
-        """
-        if options is None:
-            options = {}
-        # Use deepcopy to avoid side effects
-        if isinstance(options, dict):
-            self._options = deepcopy([options] * self.num_envs)
-        else:
-            self._options = deepcopy(options)
 
     @property
     def unwrapped(self) -> "VecEnv":
@@ -378,9 +353,6 @@ class VecEnvWrapper(VecEnv):
 
     def seed(self, seed: Optional[int] = None) -> Sequence[Union[None, int]]:
         return self.venv.seed(seed)
-
-    def set_options(self, options: Optional[Union[List[Dict], Dict]] = None) -> None:
-        return self.venv.set_options(options)
 
     def close(self) -> None:
         return self.venv.close()

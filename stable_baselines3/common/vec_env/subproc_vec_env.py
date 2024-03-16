@@ -42,8 +42,7 @@ def _worker(
                     observation, reset_info = env.reset()
                 remote.send((observation, reward, done, info, reset_info))
             elif cmd == "reset":
-                maybe_options = {"options": data[1]} if data[1] else {}
-                observation, reset_info = env.reset(seed=data[0], **maybe_options)
+                observation, reset_info = env.reset(seed=data)
                 remote.send((observation, reset_info))
             elif cmd == "render":
                 remote.send(env.render())
@@ -110,7 +109,9 @@ class SubprocVecEnv(VecEnv):
         for work_remote, remote, env_fn in zip(self.work_remotes, self.remotes, env_fns):
             args = (work_remote, remote, CloudpickleWrapper(env_fn))
             # daemon=True: if the main process crashes, we should not cause things to hang
+            # pytype: disable=attribute-error
             process = ctx.Process(target=_worker, args=args, daemon=True)  # type: ignore[attr-defined]
+            # pytype: enable=attribute-error
             process.start()
             self.processes.append(process)
             work_remote.close()
@@ -128,17 +129,16 @@ class SubprocVecEnv(VecEnv):
     def step_wait(self) -> VecEnvStepReturn:
         results = [remote.recv() for remote in self.remotes]
         self.waiting = False
-        obs, rews, dones, infos, self.reset_infos = zip(*results)  # type: ignore[assignment]
-        return _flatten_obs(obs, self.observation_space), np.stack(rews), np.stack(dones), infos  # type: ignore[return-value]
+        obs, rews, dones, infos, self.reset_infos = zip(*results)
+        return _flatten_obs(obs, self.observation_space), np.stack(rews), np.stack(dones), infos
 
     def reset(self) -> VecEnvObs:
         for env_idx, remote in enumerate(self.remotes):
-            remote.send(("reset", (self._seeds[env_idx], self._options[env_idx])))
+            remote.send(("reset", self._seeds[env_idx]))
         results = [remote.recv() for remote in self.remotes]
-        obs, self.reset_infos = zip(*results)  # type: ignore[assignment]
-        # Seeds and options are only used once
+        obs, self.reset_infos = zip(*results)
+        # Seeds are only used once
         self._reset_seeds()
-        self._reset_options()
         return _flatten_obs(obs, self.observation_space)
 
     def close(self) -> None:
@@ -219,6 +219,7 @@ def _flatten_obs(obs: Union[List[VecEnvObs], Tuple[VecEnvObs]], space: spaces.Sp
     """
     assert isinstance(obs, (list, tuple)), "expected list or tuple of observations per environment"
     assert len(obs) > 0, "need observations from at least one environment"
+
 
     if isinstance(space, spaces.Dict):
         assert isinstance(space.spaces, OrderedDict), "Dict space must have ordered subspaces"

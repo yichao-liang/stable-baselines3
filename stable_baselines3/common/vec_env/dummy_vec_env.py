@@ -73,12 +73,10 @@ class DummyVecEnv(VecEnv):
 
     def reset(self) -> VecEnvObs:
         for env_idx in range(self.num_envs):
-            maybe_options = {"options": self._options[env_idx]} if self._options[env_idx] else {}
-            obs, self.reset_infos[env_idx] = self.envs[env_idx].reset(seed=self._seeds[env_idx], **maybe_options)
+            obs, self.reset_infos[env_idx] = self.envs[env_idx].reset(seed=self._seeds[env_idx])
             self._save_obs(env_idx, obs)
-        # Seeds and options are only used once
+        # Seeds are only used once
         self._reset_seeds()
-        self._reset_options()
         return self._obs_from_buf()
 
     def close(self) -> None:

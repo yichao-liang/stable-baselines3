@@ -1,18 +1,15 @@
 """Common aliases for type hints"""
 
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple, Optional, Protocol, SupportsFloat, Tuple, Union
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Protocol, SupportsFloat, Tuple, Union
 
 import gymnasium as gym
 import numpy as np
 import torch as th
 
-# Avoid circular imports, we use type hint as string to avoid it too
-if TYPE_CHECKING:
-    from stable_baselines3.common.callbacks import BaseCallback
-    from stable_baselines3.common.vec_env import VecEnv
+from stable_baselines3.common import callbacks, vec_env
 
-GymEnv = Union[gym.Env, "VecEnv"]
+GymEnv = Union[gym.Env, vec_env.VecEnv]
 GymObs = Union[Tuple, Dict[str, Any], np.ndarray, int]
 GymResetReturn = Tuple[GymObs, Dict]
 AtariResetReturn = Tuple[np.ndarray, Dict[str, Any]]
@@ -20,8 +17,7 @@ GymStepReturn = Tuple[GymObs, float, bool, bool, Dict]
 AtariStepReturn = Tuple[np.ndarray, SupportsFloat, bool, bool, Dict[str, Any]]
 TensorDict = Dict[str, th.Tensor]
 OptimizerStateDict = Dict[str, Any]
-MaybeCallback = Union[None, Callable, List["BaseCallback"], "BaseCallback"]
-PyTorchObs = Union[th.Tensor, TensorDict]
+MaybeCallback = Union[None, Callable, List[callbacks.BaseCallback], callbacks.BaseCallback]
 
 # A schedule takes the remaining progress as input
 # and ouputs a scalar (e.g. learning rate, clip range, ...)
